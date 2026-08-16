@@ -1,0 +1,48 @@
+name: relay
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:  { description: how long, default: "30" }
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install cloudflared
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+          chmod +x cloudflared
+      - name: run relay behind a quick tunnel
+        env:
+          PSK: ${{ secrets.PSK }}
+          MINUTES: ${{ github.event.inputs.minutes }}
+        run: |
+          set -e
+          test -n "$PSK" || { echo "PSK secret missing"; exit 1; }
+          python3 relay_server.py --transport http --port 8080 --psk "$PSK" --suite shake256-hmac > server.log 2>&1 &
+          ./cloudflared tunnel --no-autoupdate --url http://localhost:8080 > tunnel.log 2>&1 &
+          echo "waiting for tunnel url..."
+          for i in $(seq 1 40); do
+            URL=$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' tunnel.log | head -1 || true)
+            [ -n "$URL" ] && break
+            sleep 2
+          done
+          if [ -z "$URL" ]; then echo "no tunnel url"; exit 1; fi
+          echo "tunnel is up (address kept encrypted)"
+          URL="$URL" python3 - <<'PY'
+          import os, secrets, mini_crypto as mc
+          url = os.environ["URL"].encode()
+          key = mc.hkdf(os.environ["PSK"].encode(), b"url-enc", b"v1")
+          nonce = secrets.token_bytes(16)
+          ct = mc.shake_stream(key, nonce, url)
+          open("url.enc", "w").write((nonce + ct + mc.mac(key, nonce + ct)).hex())
+          PY
+          git config user.name  relay-bot
+          git config user.email relay-bot@users.noreply.github.com
+          git add url.enc
+          git commit -m "tunnel address"
+          git push
+          echo "server is live for $MINUTES minutes"
+          sleep $(( MINUTES * 60 ))
