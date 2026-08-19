@@ -26,8 +26,10 @@ jobs:
           test -n "$DEVTUNNEL_TOKEN" || { echo "DEVTUNNEL_TOKEN secret missing"; exit 1; }
           python3 relay_server.py --transport http --port 8080 --psk "$PSK" --suite shake256-hmac > server.log 2>&1 &
           # מארחים את המנהרה הקבועה עם טוקן האירוח בלבד — בלי התחברות.
-          # הכתובת הציבורית קבועה, ולכן אין צורך לדחוף אותה בחזרה.
-          ./devtunnel host relaylab.uks1 -p 8080 --allow-anonymous -t "$DEVTUNNEL_TOKEN" > tunnel.log 2>&1 &
+          # *בלי* --allow-anonymous: הגישה האנונימית כבר הוגדרה ביצירת המנהרה,
+          # והדגל הזה מנסה לשנות אותה מחדש — פעולה שדורשת הרשאת manage שאין
+          # לטוקן host. הכתובת הציבורית קבועה, ולכן גם אין צורך לדחוף אותה בחזרה.
+          ./devtunnel host relaylab.uks1 -p 8080 -t "$DEVTUNNEL_TOKEN" > tunnel.log 2>&1 &
           echo "waiting for tunnel to come up..."
           for i in $(seq 1 40); do
             if grep -qi "Ready to accept connections" tunnel.log; then break; fi
