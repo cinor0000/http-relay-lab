@@ -223,4 +223,5 @@ class Session:
             try:
                 self.chan.send_keepalive()
             except (ProtocolError, TransportError, OSError):
+                self.shutdown()      # השליחה נכשלה = חיבור מת → לסגור כדי שיתחבר מחדש
                 return
