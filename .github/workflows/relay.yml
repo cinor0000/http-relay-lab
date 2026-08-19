@@ -2,47 +2,39 @@ name: relay
 on:
   workflow_dispatch:
     inputs:
-      minutes:  { description: how long, default: "30" }
+      minutes:  { description: how long, default: "120" }
 permissions:
-  contents: write
+  contents: read
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: install cloudflared
+      - name: install devtunnel
         run: |
-          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-          chmod +x cloudflared
-      - name: run relay behind a quick tunnel
+          curl -fsSL https://aka.ms/TunnelsCliDownload/linux-x64 -o devtunnel
+          chmod +x devtunnel
+          ./devtunnel --version
+      - name: run relay behind a dev tunnel
         env:
           PSK: ${{ secrets.PSK }}
+          DEVTUNNEL_TOKEN: ${{ secrets.DEVTUNNEL_TOKEN }}
           MINUTES: ${{ github.event.inputs.minutes }}
         run: |
           set -e
           test -n "$PSK" || { echo "PSK secret missing"; exit 1; }
+          test -n "$DEVTUNNEL_TOKEN" || { echo "DEVTUNNEL_TOKEN secret missing"; exit 1; }
           python3 relay_server.py --transport http --port 8080 --psk "$PSK" --suite shake256-hmac > server.log 2>&1 &
-          ./cloudflared tunnel --no-autoupdate --url http://localhost:8080 > tunnel.log 2>&1 &
-          echo "waiting for tunnel url..."
+          # מארחים את המנהרה הקבועה עם טוקן האירוח בלבד — בלי התחברות.
+          # הכתובת הציבורית קבועה, ולכן אין צורך לדחוף אותה בחזרה.
+          ./devtunnel host relaylab.uks1 -p 8080 --allow-anonymous -t "$DEVTUNNEL_TOKEN" > tunnel.log 2>&1 &
+          echo "waiting for tunnel to come up..."
           for i in $(seq 1 40); do
-            URL=$(grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' tunnel.log | head -1 || true)
-            [ -n "$URL" ] && break
+            if grep -qi "Ready to accept connections" tunnel.log; then break; fi
             sleep 2
           done
-          if [ -z "$URL" ]; then echo "no tunnel url"; exit 1; fi
-          echo "tunnel is up (address kept encrypted)"
-          URL="$URL" python3 - <<'PY'
-          import os, secrets, mini_crypto as mc
-          url = os.environ["URL"].encode()
-          key = mc.hkdf(os.environ["PSK"].encode(), b"url-enc", b"v1")
-          nonce = secrets.token_bytes(16)
-          ct = mc.shake_stream(key, nonce, url)
-          open("url.enc", "w").write((nonce + ct + mc.mac(key, nonce + ct)).hex())
-          PY
-          git config user.name  relay-bot
-          git config user.email relay-bot@users.noreply.github.com
-          git add url.enc
-          git commit -m "tunnel address"
-          git push
-          echo "server is live for $MINUTES minutes"
+          if ! grep -qi "Ready to accept connections" tunnel.log; then
+            echo "tunnel failed to start:"; cat tunnel.log; exit 1
+          fi
+          echo "tunnel is up; server live for $MINUTES minutes"
           sleep $(( MINUTES * 60 ))
