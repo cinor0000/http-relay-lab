@@ -30,14 +30,17 @@ jobs:
           # מוגדרים במנהרה מהיצירה. כל דגל שמנסה לשנות פורט/גישה מפעיל פעולת
           # ניהול שדורשת הרשאת manage שאין לטוקן host, וגם נכשל ב"batch update
           # of ports". host בלי דגלים מארח את הפורט הקיים עם host בלבד.
-          ./devtunnel host relaylab.uks1 -t "$DEVTUNNEL_TOKEN" > tunnel.log 2>&1 &
-          echo "waiting for tunnel to come up..."
-          for i in $(seq 1 40); do
-            if grep -qi "Ready to accept connections" tunnel.log; then break; fi
-            sleep 2
+          #
+          # watchdog: ‏devtunnel host קורס לפעמים בשקט (ניתוק מה-relay), וה-job
+          # היה ממשיך ל-sleep עם מנהרה מתה. לכן מריצים אותו בלולאה שמקימה אותו
+          # מחדש בכל פעם שהוא יוצא, עד תום תקציב הזמן.
+          END=$(( $(date +%s) + MINUTES * 60 ))
+          attempt=0
+          while [ "$(date +%s)" -lt "$END" ]; do
+            attempt=$(( attempt + 1 ))
+            echo "[watchdog] starting devtunnel host (attempt $attempt) at $(date -u +%H:%M:%S)"
+            ./devtunnel host relaylab.uks1 -t "$DEVTUNNEL_TOKEN" 2>&1 | sed 's/^/[host] /' || true
+            echo "[watchdog] devtunnel host exited; restarting in 3s"
+            sleep 3
           done
-          if ! grep -qi "Ready to accept connections" tunnel.log; then
-            echo "tunnel failed to start:"; cat tunnel.log; exit 1
-          fi
-          echo "tunnel is up; server live for $MINUTES minutes"
-          sleep $(( MINUTES * 60 ))
+          echo "time budget reached; exiting"
