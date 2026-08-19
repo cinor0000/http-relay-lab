@@ -24,7 +24,7 @@ jobs:
           set -e
           test -n "$PSK" || { echo "PSK secret missing"; exit 1; }
           test -n "$DEVTUNNEL_TOKEN" || { echo "DEVTUNNEL_TOKEN secret missing"; exit 1; }
-          python3 relay_server.py --transport http --port 8080 --psk "$PSK" --suite shake256-hmac > server.log 2>&1 &
+          python3 relay_server.py --transport ws --port 8080 --psk "$PSK" --suite shake256-hmac > server.log 2>&1 &
           # מארחים את המנהרה הקבועה עם טוקן האירוח בלבד — בלי התחברות.
           # *בלי* -p ובלי --allow-anonymous: פורט 8080 והגישה האנונימית כבר
           # מוגדרים במנהרה מהיצירה. כל דגל שמנסה לשנות פורט/גישה מפעיל פעולת
