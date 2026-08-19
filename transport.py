@@ -23,6 +23,12 @@ from urllib.parse import urlparse
 
 WS_GUID = b"258EAFA5-E914-47DA-95CA-5AB0DC85B11F"
 
+# כמה שניות להמתין לבייט מהמנהרה לפני שמכריזים שהחיבור מת. שני הצדדים
+# שולחים keepalive כל ~25 שניות, אז חיבור חי (גם כשאין תעבורה) מתאפס כל 25;
+# חיבור שנותק בשקט (NetFree/devtunnel חצי-פתוח) לא מקבל כלום → timeout →
+# הנתיב מתחבר מחדש במקום להישאר "זומבי" שבולע חיבורים ומחזיר אותם באיטיות.
+WS_READ_TIMEOUT = 40.0
+
 
 class TransportError(Exception):
     pass
@@ -80,7 +86,10 @@ class WsTransport:
     # --- קריאה גולמית מהסוקט
     def _raw_exact(self, n: int) -> bytes:
         while len(self._raw) < n:
-            chunk = self.sock.recv(max(n - len(self._raw), 8192))
+            try:
+                chunk = self.sock.recv(max(n - len(self._raw), 8192))
+            except socket.timeout:
+                raise TransportError("אין תגובה מהמנהרה — חיבור מת")
             if not chunk:
                 raise TransportError("החיבור נסגר")
             self._raw += chunk
@@ -202,7 +211,7 @@ def connect(url: str, timeout: float = 20.0, cafile: str = None):
     if expected.lower().encode() not in head.lower():
         raise TransportError("השרת החזיר Sec-WebSocket-Accept שגוי")
 
-    sock.settimeout(None)
+    sock.settimeout(WS_READ_TIMEOUT)          # לזהות חיבור מת (ראה WS_READ_TIMEOUT)
     transport = WsTransport(sock, is_client=True)
     transport._raw = rest                     # מה שכבר הגיע אחרי הכותרות
     return transport
